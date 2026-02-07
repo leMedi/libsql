@@ -142,6 +142,7 @@ where
     };
     let router = axum::Router::new()
         .route("/", get(handle_get_index))
+        .route("/v1/namespaces", get(handle_list_namespaces))
         .route(
             "/v1/namespaces/:namespace/config",
             get(handle_get_config).post(handle_post_config),
@@ -262,8 +263,54 @@ async fn handle_get_config<C: Connector>(
         allow_attach: config.allow_attach,
         txn_timeout_s: config.txn_timeout.map(|d| d.as_secs() as u64),
         durability_mode: Some(config.durability_mode),
+        shared_schema_name: config.shared_schema_name.clone(),
     };
     Ok(Json(resp))
+}
+
+#[derive(Debug, Serialize)]
+struct NamespaceListItem {
+    name: NamespaceName,
+    #[serde(flatten)]
+    config: HttpDatabaseConfig,
+}
+
+#[derive(Debug, Serialize)]
+struct ListNamespacesResponse {
+    namespaces: Vec<NamespaceListItem>,
+}
+
+async fn handle_list_namespaces<C>(
+    State(app_state): State<Arc<AppState<C>>>,
+) -> crate::Result<Json<ListNamespacesResponse>> {
+    let namespace_names = app_state.namespaces.meta_store().list_namespaces().await?;
+
+    let mut namespaces = Vec::with_capacity(namespace_names.len());
+
+    for name in namespace_names {
+        let store = app_state.namespaces.config_store(name.clone()).await?;
+        let config = store.get();
+        let max_db_size = bytesize::ByteSize::b(config.max_db_pages * LIBSQL_PAGE_SIZE);
+
+        let item = NamespaceListItem {
+            name: name.clone(),
+            config: HttpDatabaseConfig {
+                block_reads: config.block_reads,
+                block_writes: config.block_writes,
+                block_reason: config.block_reason.clone(),
+                max_db_size: Some(max_db_size),
+                heartbeat_url: config.heartbeat_url.clone().map(|u| u.into()),
+                jwt_key: config.jwt_key.clone(),
+                allow_attach: config.allow_attach,
+                txn_timeout_s: config.txn_timeout.map(|d| d.as_secs() as u64),
+                durability_mode: Some(config.durability_mode),
+                shared_schema_name: config.shared_schema_name.clone(),
+            },
+        };
+        namespaces.push(item);
+    }
+
+    Ok(Json(ListNamespacesResponse { namespaces }))
 }
 
 async fn handle_diagnostics<C>(
@@ -311,6 +358,8 @@ struct HttpDatabaseConfig {
     txn_timeout_s: Option<u64>,
     #[serde(default)]
     durability_mode: Option<DurabilityMode>,
+    #[serde(default)]
+    shared_schema_name: Option<NamespaceName>,
 }
 
 async fn handle_post_config<C>(
