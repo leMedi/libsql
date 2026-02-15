@@ -49,6 +49,12 @@ impl TurmoilAcceptor {
 
 impl Accept for TurmoilAcceptor {
     type Connection = TurmoilAddrStream;
+
+    fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        // For test purposes, return a dummy address
+        // In a real implementation, we'd need to store the address when binding
+        Ok(SocketAddr::from(([127, 0, 0, 1], 0)))
+    }
 }
 
 impl HyperAccept for TurmoilAcceptor {

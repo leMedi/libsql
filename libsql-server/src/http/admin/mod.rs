@@ -43,12 +43,40 @@ impl Metrics {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ServerInfo {
+    pub version: String,
+    pub user_api: UserApiInfo,
+    pub admin_api: AdminApiInfo,
+    pub rpc: RpcInfo,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UserApiInfo {
+    pub http_listen_addr: Option<String>,
+    pub hrana_ws_listen_addr: Option<String>,
+    pub self_url: Option<String>,
+    pub primary_url: Option<String>,
+    pub enable_http_console: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminApiInfo {
+    pub listen_addr: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RpcInfo {
+    pub listen_addr: Option<String>,
+}
+
 struct AppState<C> {
     namespaces: NamespaceStore,
     user_http_server: Arc<hrana::http::Server>,
     connector: C,
     metrics: Metrics,
     set_env_filter: Option<Box<dyn Fn(&str) -> anyhow::Result<()> + Sync + Send + 'static>>,
+    server_info: ServerInfo,
 }
 
 impl<C> FromRef<Arc<AppState<C>>> for Metrics {
@@ -68,11 +96,17 @@ pub async fn run<A, C>(
     shutdown: Arc<Notify>,
     auth: Option<Arc<str>>,
     set_env_filter: Option<Box<dyn Fn(&str) -> anyhow::Result<()> + Sync + Send + 'static>>,
+    mut server_info: ServerInfo,
 ) -> anyhow::Result<()>
 where
     A: crate::net::Accept,
     C: Connector,
 {
+    // Capture the admin listen address from the acceptor
+    if let Ok(addr) = acceptor.local_addr() {
+        server_info.admin_api.listen_addr = Some(addr.to_string());
+    }
+
     let app_label = std::env::var("SQLD_APP_LABEL").ok();
     let ver = env!("CARGO_PKG_VERSION");
 
@@ -171,12 +205,14 @@ where
         .route("/profile/heap/disable/:id", post(disable_profile_heap))
         .route("/profile/heap/:id", delete(delete_profile_heap))
         .route("/log-filter", post(handle_set_log_filter))
+        .route("/v1/server/info", get(handle_server_info))
         .with_state(Arc::new(AppState {
             namespaces: namespaces.clone(),
             connector,
             user_http_server,
             metrics,
             set_env_filter,
+            server_info,
         }))
         .layer(
             tower_http::trace::TraceLayer::new_for_http()
@@ -237,6 +273,12 @@ async fn auth_middleware<B>(
 
 async fn handle_get_index() -> &'static str {
     "Welcome to the sqld admin API"
+}
+
+async fn handle_server_info<C>(
+    State(app_state): State<Arc<AppState<C>>>,
+) -> crate::Result<Json<ServerInfo>> {
+    Ok(Json(app_state.server_info.clone()))
 }
 
 async fn handle_metrics(State(metrics): State<Metrics>) -> String {

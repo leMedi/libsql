@@ -177,3 +177,66 @@ fn list_namespaces_basic() {
 
     sim.run().unwrap();
 }
+
+#[test]
+fn get_server_info_basic() {
+    let mut sim = turmoil::Builder::new()
+        .simulation_duration(Duration::from_secs(1000))
+        .build();
+
+    sim.host("primary", || async move {
+        let tmp = tempdir().unwrap();
+        let server = TestServer {
+            path: tmp.path().to_owned().into(),
+            user_api_config: UserApiConfig {
+                self_url: Some("http://test.example.com:8080".into()),
+                primary_url: Some("http://primary.example.com:8080".into()),
+                enable_http_console: true,
+                ..Default::default()
+            },
+            admin_api_config: Some(AdminApiConfig {
+                acceptor: TurmoilAcceptor::bind(([0, 0, 0, 0], 9090)).await.unwrap(),
+                connector: TurmoilConnector,
+                disable_metrics: true,
+                auth_key: None,
+            }),
+            disable_namespaces: false,
+            ..Default::default()
+        };
+        server.start_sim(8080).await?;
+        Ok(())
+    });
+
+    sim.client("test", async {
+        let client = Client::new();
+
+        let resp = client.get("http://primary:9090/v1/server/info").await?;
+
+        assert!(resp.status().is_success());
+        let body: serde_json::Value = resp.json().await?;
+
+        // Verify version is present and is a string
+        assert!(body["version"].is_string());
+        assert!(!body["version"].as_str().unwrap().is_empty());
+
+        // Verify user_api fields
+        assert_eq!(
+            body["user_api"]["self_url"].as_str().unwrap(),
+            "http://test.example.com:8080"
+        );
+        assert_eq!(
+            body["user_api"]["primary_url"].as_str().unwrap(),
+            "http://primary.example.com:8080"
+        );
+        assert_eq!(body["user_api"]["enable_http_console"], true);
+
+        // Verify structure has all expected sections
+        assert!(body["user_api"].is_object());
+        assert!(body["admin_api"].is_object());
+        assert!(body["rpc"].is_object());
+
+        Ok(())
+    });
+
+    sim.run().unwrap();
+}

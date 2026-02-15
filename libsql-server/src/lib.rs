@@ -30,6 +30,7 @@ use config::{
 };
 use futures::future::ready;
 use futures::Future;
+use http::admin::{AdminApiInfo, RpcInfo, ServerInfo, UserApiInfo};
 use http::user::UserApi;
 use hyper::client::HttpConnector;
 use hyper::Uri;
@@ -191,6 +192,7 @@ struct Services<A, P, S, C> {
     replication_service: S,
     user_api_config: UserApiConfig<A>,
     admin_api_config: Option<AdminApiConfig<A, C>>,
+    rpc_server_config: Option<RpcServerConfig<A>>,
     disable_namespaces: bool,
     disable_default_namespace: bool,
     db_config: DbConfig,
@@ -276,6 +278,42 @@ where
     C: Connector,
 {
     fn configure(mut self, task_manager: &mut TaskManager) {
+        // Capture addresses from acceptors before they are moved
+        let http_listen_addr = self
+            .user_api_config
+            .http_acceptor
+            .as_ref()
+            .and_then(|a| a.local_addr().ok().map(|addr| addr.to_string()));
+        let hrana_ws_listen_addr = self
+            .user_api_config
+            .hrana_ws_acceptor
+            .as_ref()
+            .and_then(|a| a.local_addr().ok().map(|addr| addr.to_string()));
+        let rpc_listen_addr = self
+            .rpc_server_config
+            .as_ref()
+            .and_then(|c| c.acceptor.local_addr().ok().map(|addr| addr.to_string()));
+
+        // Build server info for the admin API (if enabled)
+        let server_info = self.admin_api_config.as_ref().map(|_| {
+            ServerInfo {
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                user_api: UserApiInfo {
+                    http_listen_addr,
+                    hrana_ws_listen_addr,
+                    self_url: self.user_api_config.self_url.clone(),
+                    primary_url: self.user_api_config.primary_url.clone(),
+                    enable_http_console: self.user_api_config.enable_http_console,
+                },
+                admin_api: AdminApiInfo {
+                    listen_addr: None, // Will be filled at runtime by admin::run()
+                },
+                rpc: RpcInfo {
+                    listen_addr: rpc_listen_addr,
+                },
+            }
+        });
+
         let user_http = UserApi {
             http_acceptor: self.user_api_config.http_acceptor,
             hrana_ws_acceptor: self.user_api_config.hrana_ws_acceptor,
@@ -311,6 +349,7 @@ where
                     shutdown,
                     auth_key.map(Into::into),
                     self.set_log_level.take(),
+                    server_info.unwrap(),
                 )
             });
         }
@@ -524,6 +563,7 @@ where
             replication_service,
             user_api_config: self.user_api_config,
             admin_api_config: self.admin_api_config,
+            rpc_server_config: self.rpc_server_config,
             disable_namespaces: self.disable_namespaces,
             disable_default_namespace: self.disable_default_namespace,
             db_config: self.db_config,

@@ -45,6 +45,7 @@ pub trait Accept:
     HyperAccept<Conn = Self::Connection, Error = IoError> + Unpin + Send + 'static
 {
     type Connection: Conn;
+    fn local_addr(&self) -> std::io::Result<SocketAddr>;
 }
 
 pub struct AddrIncoming {
@@ -92,6 +93,10 @@ pin_project! {
 
 impl Accept for AddrIncoming {
     type Connection = AddrStream;
+
+    fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        self.listener.local_addr()
+    }
 }
 
 impl<T> Conn for AddrStream<T>
