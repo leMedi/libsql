@@ -616,6 +616,12 @@ impl MetaStore {
         }
         None
     }
+
+    pub async fn list_namespaces(&self) -> crate::Result<Vec<NamespaceName>> {
+        let configs = self.inner.configs.lock().await;
+        let namespaces = configs.keys().cloned().collect();
+        Ok(namespaces)
+    }
 }
 
 impl MetaStoreHandle {
