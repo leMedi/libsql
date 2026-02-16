@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: tursodatabase/libsql-server
+  IMAGE_NAME: lemedi/libsql-server
 
 jobs:
   build-amd64:
