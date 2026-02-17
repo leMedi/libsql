@@ -111,23 +111,28 @@ fn list_namespaces_basic() {
     sim.client("client", async {
         let client = Client::new();
 
-        // Step 1: List initially - should have default namespace
-        let resp = client
-            .get("http://primary:9090/v1/namespaces")
-            .await?;
+        // Step 1: List initially - should have no namespaces (default is not auto-created when namespaces are enabled)
+        let resp = client.get("http://primary:9090/v1/namespaces").await?;
         assert!(resp.status().is_success());
 
         let body: serde_json::Value = resp.json().await?;
         let namespaces = body["namespaces"].as_array().unwrap();
-        assert_eq!(namespaces.len(), 1);
-        assert_eq!(namespaces[0]["name"], "default");
+        assert_eq!(namespaces.len(), 0);
 
-        // Step 2: Create foo namespace
+        // Step 2: Create default namespace explicitly
+        client
+            .post(
+                "http://primary:9090/v1/namespaces/default/create",
+                json!({}),
+            )
+            .await?;
+
+        // Step 3: Create foo namespace
         client
             .post("http://primary:9090/v1/namespaces/foo/create", json!({}))
             .await?;
 
-        // Step 3: Create schema namespace and bar with shared_schema_name
+        // Step 4: Create schema namespace and bar with shared_schema_name
         client
             .post(
                 "http://primary:9090/v1/namespaces/schema/create",
@@ -141,13 +146,11 @@ fn list_namespaces_basic() {
             )
             .await?;
 
-        // Step 4: List again - should have 3 namespaces
-        let resp = client
-            .get("http://primary:9090/v1/namespaces")
-            .await?;
+        // Step 5: List again - should have 4 namespaces (default, foo, bar, schema)
+        let resp = client.get("http://primary:9090/v1/namespaces").await?;
         let body: serde_json::Value = resp.json().await?;
         let namespaces = body["namespaces"].as_array().unwrap();
-        assert_eq!(namespaces.len(), 3);
+        assert_eq!(namespaces.len(), 4);
 
         // Verify all namespace names are present
         let names: Vec<_> = namespaces
@@ -157,19 +160,14 @@ fn list_namespaces_basic() {
         assert!(names.contains(&"default"));
         assert!(names.contains(&"foo"));
         assert!(names.contains(&"bar"));
+        assert!(names.contains(&"schema"));
 
         // Verify shared_schema_name for bar
-        let bar = namespaces
-            .iter()
-            .find(|n| n["name"] == "bar")
-            .unwrap();
+        let bar = namespaces.iter().find(|n| n["name"] == "bar").unwrap();
         assert_eq!(bar["shared_schema_name"], "schema");
 
         // Verify foo doesn't have shared_schema_name
-        let foo = namespaces
-            .iter()
-            .find(|n| n["name"] == "foo")
-            .unwrap();
+        let foo = namespaces.iter().find(|n| n["name"] == "foo").unwrap();
         assert!(foo["shared_schema_name"].is_null());
 
         Ok(())
