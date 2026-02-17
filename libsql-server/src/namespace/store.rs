@@ -502,7 +502,7 @@ impl NamespaceStore {
         self.with(namespace, |ns| ns.db_config_store.clone()).await
     }
 
-    pub(crate) fn meta_store(&self) -> &MetaStore {
+    pub fn meta_store(&self) -> &MetaStore {
         &self.inner.metadata
     }
 
